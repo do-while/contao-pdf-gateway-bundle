@@ -12,9 +12,26 @@ declare( strict_types=1 );
 
 namespace Softleister\ContaoPdfGatewayBundle\Gateway;
 
+use Contao\System;
+use Contao\FilesModel;
+use Contao\StringUtil;
+
+use Contao\FrontendUser;
+use Psr\Log\LoggerInterface;
+use Codefog\HasteBundle\StringParser;
+use Symfony\Component\VarDumper\VarDumper;
+use Contao\CoreBundle\Framework\ContaoFramework;
+use Terminal42\NotificationCenterBundle\Parcel\Parcel;
+use Terminal42\NotificationCenterBundle\Receipt\Receipt;
+use Terminal42\NotificationCenterBundle\BulkyItem\FileItem;
+use Terminal42\NotificationCenterBundle\Parcel\ParcelCollection;
 use Terminal42\NotificationCenterBundle\Gateway\GatewayInterface;
-use Terminal42\NotificationCenterBundle\Gateway\GatewayContext;
-use Terminal42\NotificationCenterBundle\Gateway\GatewayManager;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
+use Terminal42\NotificationCenterBundle\Parcel\Stamp\BulkyItemsStamp;
+use Terminal42\NotificationCenterBundle\Parcel\Stamp\GatewayConfigStamp;
+use Terminal42\NotificationCenterBundle\Parcel\Stamp\TokenCollectionStamp;
+
+// \file_put_contents( '../var/logs/sl-debug.log', __METHOD__ . ': parcel = ' . \print_r($parcel, true). "\n", FILE_APPEND );
 
 /**
  * Gateway that generates a file from SimpleTokens and attaches it to the notification.
@@ -22,117 +39,215 @@ use Terminal42\NotificationCenterBundle\Gateway\GatewayManager;
  */
 class ContaoPdfGatewayGateway implements GatewayInterface
 {
-    public const NAME = 'pdf_gateway';
+    public const NAME = 'pdfgateway';
 
-    /**
-     * Return the internal gateway name (unique identifier).
-     * Gibt den Namen des internen Gateways zurück (eindeutige Kennung).
-     */
+    public function __construct(
+        private readonly ContaoFramework $contaoFramework,
+        private readonly StringParser $stringParser, )
+    {
+    }
+
     public function getName( ): string
     {
         return self::NAME;
     }
 
-    /**
-     * Return a human‑readable label for the gateway.
-     * Rückgabe einer von Menschen lesbaren Bezeichnung für das Gateway.
-     */
-    public function getLabel( ): string
-    {
-        return 'PDF Gateway';
-    }
 
-    /**
-     * Define configurable options for this gateway.
-     * Definieren Sie konfigurierbare Optionen für dieses Gateway.
-     */
-    public function getOptions( ): array
-    {
-        return [
-            'gateway' => [
-                'label'       => 'Weiteres Gateway',
-                'inputType'   => 'select',
-                'options_callback' => [static::class, 'getAvailableGateways'],
-                'eval'        => ['includeBlankOption' => true],
-            ],
-            'filename' => [
-                'label'     => 'Dateiname',
-                'inputType' => 'text',
-                'eval'      => ['mandatory' => true],
-            ],
-        ];
-    }
-
-    /**
-     * Callback to populate the gateway selection dropdown.
-     * Callback zum Auffüllen des Dropdown-Menüs für die Gateway-Auswahl.
-     */
     public static function getAvailableGateways( ): array
     {
-        $gateways = [];
-
-        foreach( GatewayManager::getInstance( )->getGateways( ) as $id => $class ) {
-            if( $id === 'file_generator' ) {
-                continue;
-            }
-            $gateways[$id] = $class::getLabel(  );
+        // Dynamisch verfügbare Gateways via Container-Parameter laden
+        $container = System::getContainer( );
+        if( !$container->hasParameter( 'terminal42.notification_center.gateways' ) ) {
+            return [];
         }
 
+        $map = $container->getParameter( 'terminal42.notification_center.gateways' );
+        $gateways = [];
+
+        foreach( $map as $alias => $serviceId ) {
+            if( self::NAME === $alias ) {
+                continue;
+            }
+            try {
+                $service = $container->get( $serviceId );
+                $gateways[$alias] = $service->getLabel( );
+            }
+            catch( \Exception $e ) {
+                // ignore
+            }
+        }
         return $gateways;
     }
 
-    /**
-     * Generate the file and attach it, then optionally forward to another gateway.
-     * Erzeugen Sie die Datei und hängen Sie sie an, und leiten Sie sie dann optional an ein anderes Gateway weiter.
-     */
-    public function compile( GatewayContext $context ): void
+
+    public function sealParcel( Parcel $parcel ): Parcel
     {
-        // Fetch all tokens
-        // Alle Token abrufen
-        $tokens = $context->getTokens( );
-
-        // Build file content (e.g. CSV)
-        // Dateiinhalt erstellen (z. B. CSV)
-        $content = $this->generateContent( $tokens );
-
-        // Determine filename and path
-        // Dateiname und Pfad bestimmen
-        $filename = $context->getOption( 'filename' );
-        $tmpPath  = 'system/tmp/' . uniqid( 'nc_file_' ) . '_' . basename( $filename );
-        $fullPath = TL_ROOT . '/' . $tmpPath;
-
-        // Write to disk
-        // Schreiben auf Festplatte
-        file_put_contents( $fullPath, $content );
-
-        // Attach the file to the notification
-        // Hängen Sie die Datei an die Meldung an
-        $context->addAttachment( [
-            'path' => $fullPath,
-            'name' => $filename,
-        ] );
-
-        // Forward to another gateway if configured
-        // Weiterleitung an ein anderes Gateway, falls konfiguriert
-        if( $next = $context->getOption('gateway') ) {
-            $context->setNextGateway( $next );
-        }
+        return $parcel;             // Keine Änderungen vor dem Versand nötig
     }
 
-    /**
-     * Convert tokens into a simple CSV (key;value).
-     * Konvertiert Token in eine einfache CSV-Datei (Schlüssel;Wert).
-     */
-    protected function generateContent( array $tokens ): string
+    
+    public function sendParcel( Parcel $parcel ): Receipt
     {
+        $arrTokens = $parcel->getStamp( TokenCollectionStamp::class )->tokenCollection->forSimpleTokenParser( );    // SimpleTokens
+        $gatewayConfig = $parcel->getStamp( GatewayConfigStamp::class )->gatewayConfig;                             // Gateway-Parameter
+
+        if( $gatewayConfig->getString( 'pdfnc_on' ) ) {                                                                                 // IF( PDF-Erstellung aktiv )
+            $rootDir = System::getContainer( )->getParameter( 'kernel.project_dir' );                                                   //   TL_ROOT
+
+            // Dateinamen zusammenbauen
+            $filename = $this->stringParser->recursiveReplaceTokensAndTags( $gatewayConfig->getString( 'pdfnc_fileext' ), $arrTokens ); //   Filename-Erweiterung aus den Eigenschaften
+            if( empty( $filename ) || in_array( substr( $filename, 0, 1 ), ['-', '_'] ) ) {
+                $filename = $gatewayConfig->getString( 'title' ) . $filename;            
+            }
+            $filename = StringUtil::standardize( StringUtil::restoreBasicEntities( $filename ) );                                       //   PDF-Dateiname
+            $savepath = FilesModel::findByUuid( $gatewayConfig->getString( 'pdfnc_savepath' ) )->path ?? '';                            //   Speicherpfad
+
+            // Speichern im Ausgabeverzeichnis ODER im Home-Verzeichnis des eingeloggten Benutzers
+            $savepath = FilesModel::findByUuid( $gatewayConfig->getString( 'pdfnc_savepath' ) )->path ?? '';                            //   Speicherpfad
+            if( $gatewayConfig->getString( 'pdfnc_useHomeDir' ) && System::getContainer( )->get( 'contao.security.token_checker' )->hasFrontendUser( ) ) {
+                                                                                                                                        //   IF( User eingeloggt )
+
+                $user = FrontendUser::getInstance( );
+                if( $user->assignDir && $user->homeDir ) {                                                                              //     IF( User hat HomeDir )
+                    $dir = FilesModel::findByUuid( $user->homeDir )->path ?? '';                                                        //       HomeDir ermitteln
+                    if( is_dir( $rootDir . '/' . $dir ) ) {                                                                             //       IF( HomeDir ist Verzeichnis )
+                        $savepath = $dir;                                                                                               //         HomeDir verwenden
+                    }                                                                                                                   //       ENDIF
+                }                                                                                                                       //     ENDIF
+            }                                                                                                                           //   ENDIF
+
+            if( file_exists( $rootDir . '/' . $savepath . '/' . $filename . '.pdf' ) ) {                                                
+                $i = 2;
+                while( file_exists( $rootDir . '/' . $savepath . '/' . $filename . '-' . $i . '.pdf' ) ) $i++;
+                $filename = $filename . '-' . $i;
+            }
+            $pdfdatei = $savepath . '/' . $filename . '.pdf';
+            file_put_contents( $rootDir . '/' . $pdfdatei, '' );                // leere Datei erzeugen um Dateinamen zu sichern
+
+            // PDF-Daten aufbereiten
+            $arrPDF = [
+                'gateid'        => $gatewayConfig->getString( 'id' ),
+                'gatetitle'     => $gatewayConfig->getString( 'title' ),
+                'filename'      => $filename,
+                'vorlage'       => FilesModel::findByUuid( $gatewayConfig->getString( 'pdff_vorlage' ) )->path ?? '',
+                'savepath'      => $savepath,
+                'protect'       => $gatewayConfig->getString( 'pdff_protect' ),
+                // 'openpassword'  => System::getContainer()->get('contao.insert_tag.parser')->replaceInline( PdfformsHelper::decrypt( $gatewayConfig->getString( 'pdff_openpassword' ) ) ),
+                'protectflags'  => StringUtil::deserialize( $gatewayConfig->getString( 'pdff_protectflags' ), true ),
+                // 'password'      => System::getContainer()->get('contao.insert_tag.parser')->replaceInline( PdfformsHelper::decrypt( $gatewayConfig->getString( 'pdff_password' ) ) ),
+                'multiform'     => StringUtil::deserialize( $gatewayConfig->getString( 'pdff_multiform' ), true ),
+                'allpages'      => $gatewayConfig->getString( 'pdff_allpages' ),
+                'offset'        => [0, 0],
+                'textcolor'     => $gatewayConfig->getString( 'pdff_textcolor' ),
+                'title'         => $gatewayConfig->getString( 'pdff_title' ),
+                'author'        => $gatewayConfig->getString( 'pdff_author' ),
+                'tokenlist'     => $gatewayConfig->getString( 'pdfnc_tokens' ),
+                'arrTokens'     => $arrTokens,
+                'R'             => FilesModel::findByUuid( $gatewayConfig->getString( 'pdff_font' ) )->path ?? '',
+                'B'             => FilesModel::findByUuid( $gatewayConfig->getString( 'pdff_fontb' ) )->path ?? '',
+                'I'             => FilesModel::findByUuid( $gatewayConfig->getString( 'pdff_fonti' ) )->path ?? '',
+                'IB'            => FilesModel::findByUuid( $gatewayConfig->getString( 'pdff_fontbi' ) )->path ?? '',
+            ];
+            if( !is_array( $arrPDF['protectflags'] ) ) $arrPDF['protectflags'] = [$arrPDF['protectflags']];
+
+            // Enter offsets if specified
+            $ofs = StringUtil::deserialize( $gatewayConfig->getString( 'pdfnc_offset' ) );
+            if( isset( $ofs[0] ) && is_numeric( $ofs[0] ) ) $arrPDF['offset'][0] = $ofs[0];
+            if( isset( $ofs[1] ) && is_numeric( $ofs[1] ) ) $arrPDF['offset'][1] = $ofs[1];
+
+            // HOOK: before pdf generation
+            if( isset( $GLOBALS['TL_HOOKS']['pdfnc_BeforePdf'] ) && \is_array( $GLOBALS['TL_HOOKS']['pdfnc_BeforePdf'] ) ) {
+                foreach( $GLOBALS['TL_HOOKS']['pdfnc_BeforePdf'] as $callback ) {
+                    $arrPDF = System::importStatic( $callback[0] )->{$callback[1]}( $arrPDF );
+                }
+            }
+// VarDumper::dump( $arrPDF );
+
+            // Own tcpdf.php from files directory
+            if( file_exists( $rootDir . '/files/tcpdf.php' ) ) {
+                require_once( $rootDir . '/files/tcpdf.php' );
+            }
+            // ELSE: not found? - Then take it from this extension
+            else {
+                require_once( $rootDir . '/vendor/do-while/contao-pdf-gateway-bundle/contao/config/tcpdf.php' );
+            }
+
+            //--- Create and save PDF file ---
+            $arrTokens['pdfnc_attachment'] = $arrTokens['pdfnc_document'] = '';
+            $pdfdatei = $savepath . '/' . $filename . '.pdf';
+
+            //--- Create token for created file ---
+            $arrTokens['pdfnc_attachment'] = $pdfdatei;
+            $arrTokens['pdfnc_document'] = basename( $pdfdatei );
+
+
+
+            //--- PDF-Datei erstellen und speichern ---
+//            if( pdfnc_helper::getPdfData( 'S', $arrPDF, $pdfdatei ) ) {
+//
+//                //--- PDF-Datei in der Dateiverwaltung eintragen ---
+//                $objFile = Dbafs::addResource( $pdfdatei );
+//
+//                // HOOK: after pdf generation
+//                if( isset( $GLOBALS['TL_HOOKS']['pdfnc_AfterPdf'] ) && \is_array( $GLOBALS['TL_HOOKS']['pdfnc_AfterPdf'] ) ) {
+//                    foreach( $GLOBALS['TL_HOOKS']['pdfnc_AfterPdf'] as $callback ) {
+//                        System::importStatic( $callback[0] )->{$callback[1]}( $pdfdatei, $arrPDF );
+//                    }
+//                }
+//            }
+//            else {
+//                $pdfdatei = '';        // es wurde keine Datei erzeugt
+//            }
+
+
+
+
+
+// VarDumper::dump( $arrTokens );
+// VarDumper::dump( $gatewayConfig );
+// VarDumper::dump( $parcel );
+
+            // PDF-Inhalt generieren (Platzhalter)
+            $content = $this->generatePdfContent( $arrTokens );
+
+            // Temporäre Datei anlegen
+            $options = $parcel->getMessageConfig( )->getOptions( );
+            $filename = $options['filename'] ?? 'document.pdf';
+            $tmpPath  = 'system/tmp/' . uniqid( 'nc_pdf_' ) . '_' . basename( $filename );
+            $fullPath = TL_ROOT . '/' . $tmpPath;
+            file_put_contents( $fullPath, $content );
+
+            // Datei im Bulky-Goods-Storage ablegen
+            $voucher = GatewayManager::getInstance( )
+                ->getNotificationCenter( )
+                ->getBulkyGoodsStorage( )
+                ->store( new FileItem( $content, $filename, 'application/pdf' ) );
+
+            // BulkyItemsStamp hinzufügen
+            $parcel = $parcel->with( new BulkyItemsStamp( [$voucher] ) );
+
+            // Receipt erzeugen und als zugestellt markieren
+            $receipt = new Receipt( $parcel );
+            $receipt->setDelivered( true );
+        }
+//        return (!isset( $arrTokens['do_not_send_notification'] ) || empty( $arrTokens['do_not_send_notification'] ) ) && 
+//               (!isset( $arrTokens['form_do_not_send_notification'] ) || empty( $arrTokens['form_do_not_send_notification'] ) );    // Notification may be sent
+
+
+        // Weiterleitung an nächstes Gateway (NC-Core kümmert sich um Dispatch)
+        return $receipt;
+    }
+
+    protected function generatePdfContent( array $tokens ): string
+    {
+        // Hier PDF-Logik einbinden (z.B. TCPDF, DOMPDF)
         $lines = [];
         foreach( $tokens as $key => $value ) {
-            // Escape semicolons
-            // Semikolon auslassen
-            $escaped = str_replace( ';', '\\;', $value );
-            $lines[] = sprintf( "%s;%s", $key, $escaped );
+            $lines[] = "$key: $value";
         }
-
         return implode( "\n", $lines );
     }
+
+
 }
+

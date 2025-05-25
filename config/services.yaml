@@ -7,6 +7,7 @@ services:
         resource: ../src/
         exclude: ../src/{ContaoManager,DependencyInjection}
 
-    # Softleister\ContaoPdfGatewayBundle\Gateway\ContaoPdfGateway:
-    #     tags:
-    #         - { name: 'contao.notification_center.gateway', gateway: 'pdf_gateway' }
+    Softleister\ContaoPdfGatewayBundle\Gateway\ContaoPdfGatewayGateway:
+        public: true
+        tags:
+            - { name: 'contao.notification_center.gateway', gateway: 'pdfgateway' }
