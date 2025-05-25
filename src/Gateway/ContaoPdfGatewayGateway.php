@@ -24,6 +24,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Terminal42\NotificationCenterBundle\Parcel\Parcel;
 use Terminal42\NotificationCenterBundle\Receipt\Receipt;
 use Terminal42\NotificationCenterBundle\BulkyItem\FileItem;
+use Terminal42\NotificationCenterBundle\NotificationCenter;
 use Terminal42\NotificationCenterBundle\Parcel\ParcelCollection;
 use Terminal42\NotificationCenterBundle\Gateway\GatewayInterface;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
@@ -43,6 +44,7 @@ class ContaoPdfGatewayGateway implements GatewayInterface
 
     public function __construct(
         private readonly ContaoFramework $contaoFramework,
+        // private NotificationCenter $notificationCenter,
         private readonly StringParser $stringParser, )
     {
     }
@@ -90,6 +92,7 @@ class ContaoPdfGatewayGateway implements GatewayInterface
     {
         $arrTokens = $parcel->getStamp( TokenCollectionStamp::class )->tokenCollection->forSimpleTokenParser( );    // SimpleTokens
         $gatewayConfig = $parcel->getStamp( GatewayConfigStamp::class )->gatewayConfig;                             // Gateway-Parameter
+// \file_put_contents( '../var/logs/sl-debug.log', __METHOD__ . ': parcel = ' . \print_r($parcel, true). "\n", FILE_APPEND );
 
         if( $gatewayConfig->getString( 'pdfnc_on' ) ) {                                                                                 // IF( PDF-Erstellung aktiv )
             $rootDir = System::getContainer( )->getParameter( 'kernel.project_dir' );                                                   //   TL_ROOT
@@ -181,6 +184,8 @@ class ContaoPdfGatewayGateway implements GatewayInterface
             $arrTokens['pdfnc_document'] = basename( $pdfdatei );
 
 
+            $content = $this->generatePdfContent( $arrTokens );
+            file_put_contents( $pdfdatei, $content );
 
             //--- PDF-Datei erstellen und speichern ---
 //            if( pdfnc_helper::getPdfData( 'S', $arrPDF, $pdfdatei ) ) {
@@ -200,31 +205,27 @@ class ContaoPdfGatewayGateway implements GatewayInterface
 //            }
 
 
+            $fileItem = new FileItem( $content, $filename, 'application/pdf' );
+            $parcel = $parcel->with( new BulkyItemsStamp( [$fileItem] ) );
+dd( $pdfdatei );
+            $name = basename( $pdfdatei );
+            $size = (int) filesize( $pdfdatei );
 
+            // $voucher = $this->getNotificationCenter( )->getBulkyItemStorage( )->store( FileItem::fromPath( $pdfdatei, $name, 'application/pdf', $size ) );
+            // $bulkyItemVouchers[] = $voucher;
 
+            // $stamps = $stamps->with( new BulkyItemsStamp( $bulkyItemVouchers ) );
 
 // VarDumper::dump( $arrTokens );
 // VarDumper::dump( $gatewayConfig );
 // VarDumper::dump( $parcel );
 
             // PDF-Inhalt generieren (Platzhalter)
-            $content = $this->generatePdfContent( $arrTokens );
+VarDumper::dump( $stamps );
 
-            // Temporäre Datei anlegen
-            $options = $parcel->getMessageConfig( )->getOptions( );
-            $filename = $options['filename'] ?? 'document.pdf';
-            $tmpPath  = 'system/tmp/' . uniqid( 'nc_pdf_' ) . '_' . basename( $filename );
-            $fullPath = TL_ROOT . '/' . $tmpPath;
-            file_put_contents( $fullPath, $content );
-
-            // Datei im Bulky-Goods-Storage ablegen
-            $voucher = GatewayManager::getInstance( )
-                ->getNotificationCenter( )
-                ->getBulkyGoodsStorage( )
-                ->store( new FileItem( $content, $filename, 'application/pdf' ) );
 
             // BulkyItemsStamp hinzufügen
-            $parcel = $parcel->with( new BulkyItemsStamp( [$voucher] ) );
+            // $parcel = $parcel->with( new BulkyItemsStamp( [$voucher] ) );
 
             // Receipt erzeugen und als zugestellt markieren
             $receipt = new Receipt( $parcel );
@@ -232,7 +233,6 @@ class ContaoPdfGatewayGateway implements GatewayInterface
         }
 //        return (!isset( $arrTokens['do_not_send_notification'] ) || empty( $arrTokens['do_not_send_notification'] ) ) && 
 //               (!isset( $arrTokens['form_do_not_send_notification'] ) || empty( $arrTokens['form_do_not_send_notification'] ) );    // Notification may be sent
-
 
         // Weiterleitung an nächstes Gateway (NC-Core kümmert sich um Dispatch)
         return $receipt;
