@@ -12,9 +12,9 @@ declare( strict_types=1 );
 
 namespace Softleister\ContaoPdfGatewayBundle\Gateway;
 
-use Terminal42\NotificationCenter\Gateway\GatewayInterface;
-use Terminal42\NotificationCenter\Gateway\GatewayContext;
-use Terminal42\NotificationCenter\Gateway\GatewayManager;
+use Terminal42\NotificationCenterBundle\Gateway\GatewayInterface;
+use Terminal42\NotificationCenterBundle\Gateway\GatewayContext;
+use Terminal42\NotificationCenterBundle\Gateway\GatewayManager;
 
 /**
  * Gateway that generates a file from SimpleTokens and attaches it to the notification.
@@ -22,7 +22,7 @@ use Terminal42\NotificationCenter\Gateway\GatewayManager;
  */
 class ContaoPdfGatewayGateway implements GatewayInterface
 {
-    public const NAME = 'FileGenerator';
+    public const NAME = 'pdf_gateway';
 
     /**
      * Return the internal gateway name (unique identifier).
@@ -39,7 +39,7 @@ class ContaoPdfGatewayGateway implements GatewayInterface
      */
     public function getLabel( ): string
     {
-        return 'Datei-Generator';
+        return 'PDF Gateway';
     }
 
     /**
