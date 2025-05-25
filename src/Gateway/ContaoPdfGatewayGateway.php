@@ -205,11 +205,9 @@ class ContaoPdfGatewayGateway implements GatewayInterface
 //            }
 
 
-            $fileItem = new FileItem( $content, $filename, 'application/pdf' );
-            $parcel = $parcel->with( new BulkyItemsStamp( [$fileItem] ) );
-dd( $pdfdatei );
-            $name = basename( $pdfdatei );
-            $size = (int) filesize( $pdfdatei );
+// dd( $pdfdatei );
+            // $name = basename( $pdfdatei );
+            // $size = (int) filesize( $pdfdatei );
 
             // $voucher = $this->getNotificationCenter( )->getBulkyItemStorage( )->store( FileItem::fromPath( $pdfdatei, $name, 'application/pdf', $size ) );
             // $bulkyItemVouchers[] = $voucher;
@@ -221,21 +219,21 @@ dd( $pdfdatei );
 // VarDumper::dump( $parcel );
 
             // PDF-Inhalt generieren (Platzhalter)
-VarDumper::dump( $stamps );
+// VarDumper::dump( $stamps );
 
 
             // BulkyItemsStamp hinzufügen
             // $parcel = $parcel->with( new BulkyItemsStamp( [$voucher] ) );
 
             // Receipt erzeugen und als zugestellt markieren
-            $receipt = new Receipt( $parcel );
-            $receipt->setDelivered( true );
+            // $receipt = new Receipt( $parcel );
+            // $receipt->setDelivered( true );
         }
 //        return (!isset( $arrTokens['do_not_send_notification'] ) || empty( $arrTokens['do_not_send_notification'] ) ) && 
 //               (!isset( $arrTokens['form_do_not_send_notification'] ) || empty( $arrTokens['form_do_not_send_notification'] ) );    // Notification may be sent
 
         // Weiterleitung an nächstes Gateway (NC-Core kümmert sich um Dispatch)
-        return $receipt;
+        return Receipt::createForSuccessfulDelivery( $parcel );
     }
 
     protected function generatePdfContent( array $tokens ): string
