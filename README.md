@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # do-while/contao-pdf-nc-attachment-bundle
 **Diese Contao-Erweiterung erweitert das Standard-E-Mail-Gateway des Notification-Centers in Contao 4 um die Möglichkeit, mit den SimpleTokens, die an das Notification-Center übertragen werden, eine PDF-Vorlage auszufüllen, zu speichern und der Mail als Anhang mitzugeben.**
 
@@ -54,3 +55,7 @@ composer require do-while/contao-pdf-nc-attachment-bundle
 
 ___
 Softleister - 2023-08-13
+=======
+# contao-pdf-gateway-bundle
+A Notification Center gateway for Contao that generates a pdf file from SimpleTokens and attaches it to notifications.
+>>>>>>> origin/main
