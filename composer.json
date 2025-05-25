@@ -1,0 +1,25 @@
+{
+    "name": "do-while/contao-pdf-gateway-bundle",
+    "description": "A Notification Center gateway for Contao that generates a file from SimpleTokens and attaches it to notifications.",
+    "keywords": ["contao", "gateway", "notification-center"],
+    "type": "contao-bundle",
+    "license": "LGPL-3.0-or-later",
+    "authors": [{
+        "name": "Softleister - Hagen Klemp",
+        "homepage": "https://www.softleister.de",
+        "role": "Project leader"
+    }],
+    "require": {
+        "php": "^8.2",
+        "contao/core-bundle": "^5.3",
+        "terminal42/notification_center": "^2.0.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Softleister\\ContaoPdfGatewayBundle\\": "src/"
+        }
+    },
+    "extra": {
+        "contao-manager-plugin": "Softleister\\ContaoPdfGatewayBundle\\ContaoManager\\Plugin"
+    }
+}

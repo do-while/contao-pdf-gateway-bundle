@@ -1,0 +1,12 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    Softleister\ContaoPdfGatewayBundle\:
+        resource: ../src/
+        exclude: ../src/{ContaoManager,DependencyInjection}
+
+    # Softleister\ContaoPdfGatewayBundle\Gateway\ContaoPdfGateway:
+    #     tags:
+    #         - { name: 'contao.notification_center.gateway', gateway: 'pdf_gateway' }
